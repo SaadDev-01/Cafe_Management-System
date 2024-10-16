@@ -1,9 +1,9 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Main.java to edit this template
- */
 package acp.project;
+
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.*;
+
 /**
  *
  * @author SAAD
@@ -16,7 +16,6 @@ class InventoryItem {
     private String status;
     private String date;
 
-    
     public InventoryItem(String productId, String productName, int stock, double price, String status, String date) {
         this.productId = productId;
         this.productName = productName;
@@ -26,7 +25,6 @@ class InventoryItem {
         this.date = date;
     }
 
-    
     public String getProductId() {
         return productId;
     }
@@ -80,12 +78,10 @@ class InventoryItem {
     }
 }
 
-
 class MenuItem {
     private String id;
     private String name;
     private double price;
-
 
     public MenuItem(String id, String name, double price) {
         this.id = id;
@@ -170,12 +166,12 @@ class InventoryManager {
     }
 
     public void viewInventory() {
-        System.out.printf("%-12s %-15s %-10s %-10s %-10s %-10s%n", 
-                          "Product ID", "Product Name", "Stock", "Price", "Status", "Date");
+        System.out.printf("%-12s %-15s %-10s %-10s %-10s %-10s%n",
+                "Product ID", "Product Name", "Stock", "Price", "Status", "Date");
         for (InventoryItem item : inventory) {
-            System.out.printf("%-12s %-15s %-10d $%-9.2f %-10s %-10s%n", 
-                              item.getProductId(), item.getProductName(), item.getStock(),
-                              item.getPrice(), item.getStatus(), item.getDate());
+            System.out.printf("%-12s %-15s %-10d $%-9.2f %-10s %-10s%n",
+                    item.getProductId(), item.getProductName(), item.getStock(),
+                    item.getPrice(), item.getStatus(), item.getDate());
         }
     }
 
@@ -189,14 +185,14 @@ class InventoryManager {
         return availableItems;
     }
 
-    public void updateProductStockAfterOrder(String productId) {
+    public void updateProductStockAfterOrder(String productId, int quantity) {
         for (InventoryItem item : inventory) {
             if (item.getProductId().equals(productId)) {
-                if (item.getStock() > 0) {
-                    item.reduceStock(1); 
+                if (item.getStock() >= quantity) {
+                    item.reduceStock(quantity);
                     System.out.println("Stock updated for product: " + item.getProductName());
                 } else {
-                    System.out.println("Stock for " + item.getProductName() + " is empty!");
+                    System.out.println("Not enough stock for " + item.getProductName() + ". Available: " + item.getStock());
                 }
                 return;
             }
@@ -228,29 +224,61 @@ class MenuManager {
         }
     }
 
-    public double orderItems() {
+    public double orderItems(CustomerManager customerManager) {
         Scanner scanner = new Scanner(System.in);
         double totalBill = 0.0;
+        List<MenuItem> orderedItems = new ArrayList<>();
+
         while (true) {
             System.out.print("Enter Menu Item ID to order (or 'done' to finish): ");
             String input = scanner.nextLine();
             if (input.equalsIgnoreCase("done")) {
                 break;
             }
+
+            MenuItem orderedItem = null;
             for (MenuItem item : menu) {
                 if (item.getId().equals(input)) {
-                    totalBill += item.getPrice();
-                    System.out.println("Added " + item.getName() + " to your order.");
-                    inventoryManager.updateProductStockAfterOrder(item.getId());
+                    orderedItem = item;
                     break;
                 }
             }
+
+            if (orderedItem == null) {
+                System.out.println("Invalid item ID.");
+                continue;
+            }
+
+            System.out.print("Enter quantity: ");
+            int quantity = scanner.nextInt();
+            scanner.nextLine();  // Consume newline
+
+            inventoryManager.updateProductStockAfterOrder(orderedItem.getId(), quantity);
+            orderedItems.add(orderedItem);
+            totalBill += orderedItem.getPrice() * quantity;
+
+            System.out.println("Added " + quantity + " x " + orderedItem.getName() + " to your order.");
         }
+
         System.out.printf("Total Bill: $%.2f%n", totalBill);
+
+        System.out.print("Enter Customer ID: ");
+        String customerId = scanner.nextLine();
+        Customer customer = customerManager.findCustomer(customerId);
+
+        if (customer == null) {
+            System.out.println("New customer! Creating account...");
+            customer = new Customer(customerId, totalBill, java.time.LocalDate.now().toString());
+            customerManager.addCustomer(customer);
+        } else {
+            customer.addSpending(totalBill);
+        }
+
+        FileManager.writeCustomerData(java.time.LocalDate.now().toString(), customerId, totalBill, orderedItems, inventoryManager.getAvailableItems());
+
         return totalBill;
     }
 }
-
 
 class CustomerManager {
     private List<Customer> customers = new ArrayList<>();
@@ -277,95 +305,106 @@ class CustomerManager {
     }
 }
 
+class FileManager {
+    private static final String FILE_NAME = System.getProperty("user.home") + "/Desktop/customer_sales_data.txt";  
+
+    public static void writeCustomerData(String date, String customerId, double totalSpent, List<MenuItem> orderedItems, List<InventoryItem> inventoryAfterOrder) {
+        try (FileWriter writer = new FileWriter(FILE_NAME, true)) {  
+            // Header for the table
+            writer.write("=====================================================================\n");
+            writer.write(String.format("%-15s %-15s %-20s %-15s%n", "Date", "Customer ID", "Ordered Item(s)", "Total Spent"));
+            writer.write("=====================================================================\n");
+
+            // Write customer order details in table form
+            writer.write(String.format("%-15s %-15s %-20s $%-14.2f%n", date, customerId, formatOrderedItems(orderedItems), totalSpent));
+
+            // Header for the inventory table after order
+            writer.write("\nInventory Status After Order:\n");
+            writer.write("---------------------------------------------------------------------\n");
+            writer.write(String.format("%-20s %-15s%n", "Product Name", "Remaining Stock"));
+            writer.write("---------------------------------------------------------------------\n");
+
+            // Write remaining stock for each item
+            for (InventoryItem item : inventoryAfterOrder) {
+                writer.write(String.format("%-20s %-15d%n", item.getProductName(), item.getStock()));
+            }
+
+            writer.write("=====================================================================\n\n");
+            System.out.println("Customer order details written to file successfully!");
+
+        } catch (IOException e) {
+            System.out.println("An error occurred while writing to the file.");
+            e.printStackTrace();
+        }
+    }
+
+    private static String formatOrderedItems(List<MenuItem> orderedItems) {
+        StringBuilder sb = new StringBuilder();
+        for (MenuItem item : orderedItems) {
+            sb.append(item.getName()).append(", ");
+        }
+        if (sb.length() > 0) {
+            sb.setLength(sb.length() - 2);
+        }
+        return sb.toString();
+    }
+}
+
+
 
 public class CafeManagementSystem {
-    private static final Scanner scanner = new Scanner(System.in);
-    private static final String ADMIN_USERNAME = "admin";
-    private static final String ADMIN_PASSWORD = "password";
 
-    private static InventoryManager inventoryManager = new InventoryManager();
-    private static MenuManager menuManager = new MenuManager(inventoryManager);
-    private static CustomerManager customerManager = new CustomerManager();
-    private static double totalSales = 0.0;
+    private static final InventoryManager inventoryManager = new InventoryManager();
+    private static final CustomerManager customerManager = new CustomerManager();
 
     public static void main(String[] args) {
-        login();
-        mainMenu();
-    }
+        MenuManager menuManager = new MenuManager(inventoryManager);
+        Scanner scanner = new Scanner(System.in);
 
-    private static void login() {
-        System.out.print("Enter username: ");
-        String username = scanner.nextLine();
-        System.out.print("Enter password: ");
-        String password = scanner.nextLine();
-
-        if (!username.equals(ADMIN_USERNAME) || !password.equals(ADMIN_PASSWORD)) {
-            System.out.println("Invalid credentials. Exiting...");
-            System.exit(0);
-        }
-    }
-
-    private static void mainMenu() {
         while (true) {
-            System.out.println("\nMain Menu:");
-            System.out.println("1. Inventory Management");
-            System.out.println("2. Menu Management");
-            System.out.println("3. Customer Management");
-            System.out.println("4. Exit");
-            System.out.print("Select an option: ");
-            int choice = scanner.nextInt();
-            scanner.nextLine();
-
-            switch (choice) {
-                case 1:
-                    inventoryManagement();
-                    break;
-                case 2:
-                    menuManagement();
-                    break;
-                case 3:
-                    customerManagement();
-                    break;
-                case 4:
-                    System.out.printf("Total sales: $%.2f%n", totalSales);
-                    System.out.println("Exiting...");
-                    return;
-                default:
-                    System.out.println("Invalid option. Please try again.");
-            }
-        }
-    }
-
-    private static void inventoryManagement() {
-        while (true) {
-            System.out.println("\nInventory Management:");
+            System.out.println("\nChoose an option:");
             System.out.println("1. View Inventory");
-            System.out.println("2. Add Product");
-            System.out.println("3. Update Product");
-            System.out.println("4. Delete Product");
-            System.out.println("5. Back to Main Menu");
-            System.out.print("Select an option: ");
-            int choice = scanner.nextInt();
-            scanner.nextLine(); 
+            System.out.println("2. Add Product to Inventory");
+            System.out.println("3. Update Product in Inventory");
+            System.out.println("4. Delete Product from Inventory");
+            System.out.println("5. View Menu");
+            System.out.println("6. Order Items");
+            System.out.println("7. View Customers");
+            System.out.println("0. Exit");
+
+            int choice = -1;
+            try {
+                choice = Integer.parseInt(scanner.nextLine());
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a number.");
+                continue;
+            }
 
             switch (choice) {
                 case 1:
                     inventoryManager.viewInventory();
                     break;
                 case 2:
-                    addProduct();
+                    addNewProductToInventory(scanner);
                     break;
                 case 3:
-                    System.out.print("Enter Product ID to update: ");
-                    String productId = scanner.nextLine();
-                    inventoryManager.updateProduct(productId);
+                    updateProductInInventory(scanner);
                     break;
                 case 4:
-                    System.out.print("Enter Product ID to delete: ");
-                    String productIdToDelete = scanner.nextLine();
-                    inventoryManager.deleteProduct(productIdToDelete);
+                    deleteProductFromInventory(scanner);
                     break;
                 case 5:
+                    menuManager.updateMenuFromInventory();
+                    menuManager.viewMenu();
+                    break;
+                case 6:
+                    menuManager.orderItems(customerManager);
+                    break;
+                case 7:
+                    customerManager.viewCustomers();
+                    break;
+                case 0:
+                    System.out.println("Exiting the program...");
                     return;
                 default:
                     System.out.println("Invalid option. Please try again.");
@@ -373,7 +412,7 @@ public class CafeManagementSystem {
         }
     }
 
-    private static void addProduct() {
+    private static void addNewProductToInventory(Scanner scanner) {
         System.out.print("Enter Product ID: ");
         String productId = scanner.nextLine();
         System.out.print("Enter Product Name: ");
@@ -382,69 +421,25 @@ public class CafeManagementSystem {
         int stock = scanner.nextInt();
         System.out.print("Enter Price: ");
         double price = scanner.nextDouble();
-        scanner.nextLine();
+        scanner.nextLine();  // Consume newline
         System.out.print("Enter Status: ");
         String status = scanner.nextLine();
         System.out.print("Enter Date (YYYY-MM-DD): ");
         String date = scanner.nextLine();
 
-        inventoryManager.addProduct(new InventoryItem(productId, productName, stock, price, status, date));
-        menuManager.updateMenuFromInventory();
+        InventoryItem newItem = new InventoryItem(productId, productName, stock, price, status, date);
+        inventoryManager.addProduct(newItem);
     }
 
-    private static void menuManagement() {
-        while (true) {
-            System.out.println("\nMenu Management:");
-            System.out.println("1. View Menu");
-            System.out.println("2. Order Items");
-            System.out.println("3. Back to Main Menu");
-            System.out.print("Select an option: ");
-            int choice = scanner.nextInt();
-            scanner.nextLine(); 
-
-            switch (choice) {
-                case 1:
-                    menuManager.viewMenu();
-                    break;
-                case 2:
-                    double bill = menuManager.orderItems();
-                    totalSales += bill;
-                    System.out.print("Enter Customer ID: ");
-                    String customerId = scanner.nextLine();
-                    Customer customer = customerManager.findCustomer(customerId);
-                    if (customer == null) {
-                        System.out.println("New customer! Creating account...");
-                        customerManager.addCustomer(new Customer(customerId, bill, java.time.LocalDate.now().toString()));
-                    } else {
-                        customer.addSpending(bill);
-                    }
-                    break;
-                case 3:
-                    return;
-                default:
-                    System.out.println("Invalid option. Please try again.");
-            }
-        }
+    private static void updateProductInInventory(Scanner scanner) {
+        System.out.print("Enter Product ID to update: ");
+        String productId = scanner.nextLine();
+        inventoryManager.updateProduct(productId);
     }
 
-    private static void customerManagement() {
-        while (true) {
-            System.out.println("\nCustomer Management:");
-            System.out.println("1. View Customers");
-            System.out.println("2. Back to Main Menu");
-            System.out.print("Select an option: ");
-            int choice = scanner.nextInt();
-            scanner.nextLine(); 
-
-            switch (choice) {
-                case 1:
-                    customerManager.viewCustomers();
-                    break;
-                case 2:
-                    return;
-                default:
-                    System.out.println("Invalid option. Please try again.");
-            }
-        }
+    private static void deleteProductFromInventory(Scanner scanner) {
+        System.out.print("Enter Product ID to delete: ");
+        String productId = scanner.nextLine();
+        inventoryManager.deleteProduct(productId);
     }
 }
